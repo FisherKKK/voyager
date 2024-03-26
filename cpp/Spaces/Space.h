@@ -25,6 +25,8 @@
 #include <functional>
 
 namespace hnswlib {
+
+// 这里相当于是定义了一个函数类型, MTYPE应该是返回值的类型
 template <typename MTYPE, typename data_t = MTYPE>
 using DISTFUNC =
     std::function<MTYPE(const data_t *, const data_t *, const size_t)>;
@@ -34,9 +36,11 @@ using DISTFUNC =
  * and encapsulating the data required to search that space.
  *
  * Possible subclasses include Euclidean, InnerProduct, etc.
+ * 这里相当于是空间的基类
  */
 template <typename MTYPE, typename data_t = MTYPE> class Space {
 public:
+  // 定义了一系列的纯虚函数, 可以说这些只是一个接口
   virtual size_t get_data_size() = 0;
 
   virtual DISTFUNC<MTYPE, data_t> get_dist_func() = 0;

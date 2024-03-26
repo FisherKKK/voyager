@@ -55,6 +55,7 @@ public:
 ///////////////////////////////////////////////////////////
 //
 // Class for multi-threaded pool-management of VisitedLists
+// 多线程的visitedlist池管理
 //
 /////////////////////////////////////////////////////////
 
@@ -66,7 +67,7 @@ class VisitedListPool {
 public:
   VisitedListPool(int initmaxpools, int numelements1) {
     numelements = numelements1;
-    for (int i = 0; i < initmaxpools; i++)
+    for (int i = 0; i < initmaxpools; i++) // 这里相当于生成了initmaxpools个VisitedList
       pool.push_front(new VisitedList(numelements));
   }
 

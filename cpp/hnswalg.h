@@ -56,7 +56,7 @@ typedef unsigned int linklistsizeint;
 template <typename dist_t, typename data_t = dist_t>
 class HierarchicalNSW : public AlgorithmInterface<dist_t, data_t> {
 public:
-  static const tableint max_update_element_locks = 65536;
+  static const tableint max_update_element_locks = 65536; // 最大的锁数目
 
   HierarchicalNSW(Space<dist_t, data_t> *s,
                   std::shared_ptr<InputStream> inputStream,
@@ -64,7 +64,7 @@ public:
       : search_only_(search_only) {
     loadIndex(inputStream, s, max_elements);
   }
-
+  // 这里就相当于从内存数据中生成HNSW结构
   HierarchicalNSW(Space<dist_t, data_t> *s, size_t max_elements, size_t M = 16,
                   size_t ef_construction = 200, size_t random_seed = 100)
       : link_list_locks_(max_elements),
@@ -85,15 +85,15 @@ public:
     level_generator_.seed(random_seed);
     update_probability_generator_.seed(random_seed + 1);
 
-    size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
+    size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint); // 0层的link大小
     size_data_per_element_ =
-        size_links_level0_ + data_size_ + sizeof(labeltype);
+        size_links_level0_ + data_size_ + sizeof(labeltype); // 0层每个点的所需空间
     offsetData_ = size_links_level0_;
     label_offset_ = size_links_level0_ + data_size_;
     offsetLevel0_ = 0;
 
     data_level0_memory_ =
-        (char *)malloc(max_elements_ * size_data_per_element_);
+        (char *)malloc(max_elements_ * size_data_per_element_); //? 采用malloc进行内存分配
     if (data_level0_memory_ == nullptr)
       throw std::runtime_error("Not enough memory");
 
@@ -102,16 +102,16 @@ public:
     visited_list_pool_ = new VisitedListPool(1, max_elements);
 
     // initializations for special treatment of the first node
-    enterpoint_node_ = -1;
-    maxlevel_ = -1;
+    enterpoint_node_ = -1; // 入口点
+    maxlevel_ = -1; // 当前的最大层
 
-    linkLists_ = (char **)malloc(sizeof(void *) * max_elements_);
+    linkLists_ = (char **)malloc(sizeof(void *) * max_elements_); // malloc了一个链表?
     if (linkLists_ == nullptr)
       throw std::runtime_error(
           "Not enough memory: HierarchicalNSW failed to allocate linklists");
     size_links_per_element_ =
         maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
-    mult_ = 1 / log(1.0 * M_);
+    mult_ = 1 / log(1.0 * M_); // 这里是概率
     revSize_ = 1.0 / mult_;
   }
 
@@ -133,16 +133,16 @@ public:
     delete visited_list_pool_;
   }
 
-  size_t max_elements_;
-  size_t cur_element_count;
-  size_t size_data_per_element_;
-  size_t size_links_per_element_;
-  size_t num_deleted_;
+  size_t max_elements_; // 最大元素数目
+  size_t cur_element_count; // 当前元素数目
+  size_t size_data_per_element_;  // 每一个向量的大小
+  size_t size_links_per_element_; // 每一个向量的link大小
+  size_t num_deleted_; // 删除的点的数目
 
-  size_t M_;
+  size_t M_; // 每个点的边数
   size_t maxM_;
-  size_t maxM0_;
-  size_t ef_construction_;
+  size_t maxM0_; // 最底层点的变数
+  size_t ef_construction_; // 建图时candidate数目
 
   double mult_, revSize_;
   int maxlevel_;
@@ -1276,7 +1276,7 @@ public:
     memcpy(result.data(), ll, size * sizeof(tableint));
     return result;
   };
-
+  // 这里就是添加每一个点
   tableint addPoint(const data_t *data_point, labeltype label, int level) {
     std::shared_lock<std::shared_mutex> lock(resizeLock);
     tableint cur_c = 0;

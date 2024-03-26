@@ -26,11 +26,13 @@
 #include <ratio>
 
 namespace hnswlib {
-/**
+/**TODO
  * For a given loop unrolling factor K, distance type dist_t, and data type
  * data_t, calculate the L2 squared distance between two vectors. The compiler
  * should automatically do the loop unrolling for us here and vectorize as
  * appropriate.
+ * 首先这个函数采用了static, 也就意味着它是编译内部可见, 但是这个函数的为什么这么写
+ * K表示批量计算的大小
  */
 template <typename dist_t, typename data_t = dist_t, int K = 1,
           typename scalefactor = std::ratio<1, 1>>
@@ -38,6 +40,7 @@ static dist_t L2Sqr(const data_t *__restrict pVect1,
                     const data_t *__restrict pVect2, const size_t qty) {
   dist_t res = 0;
 
+  // 这里就相当于按照批量为K进行计算
   for (size_t i = 0; i < qty / K; i++) {
     for (size_t j = 0; j < K; j++) {
       const size_t index = (i * K) + j;
@@ -47,7 +50,7 @@ static dist_t L2Sqr(const data_t *__restrict pVect1,
     }
   }
 
-  constexpr dist_t scale = (dist_t)scalefactor::num / (dist_t)scalefactor::den;
+  constexpr dist_t scale = (dist_t)scalefactor::num / (dist_t)scalefactor::den; // 这里相当于对距离进行放缩
   return (res * scale * scale);
 }
 
@@ -225,14 +228,20 @@ static float L2SqrSIMD4ExtResiduals(const float *pVect1, const float *pVect2,
 }
 #endif
 
+
+/** 计算的度量函数: 这里采用的是模板
+ *  dist_t应该使距离的类型, data_t应该是数据的类型
+*/
 template <typename dist_t, typename data_t = dist_t,
           typename scalefactor = std::ratio<1, 1>>
 class EuclideanSpace : public Space<dist_t, data_t> {
-  DISTFUNC<dist_t, data_t> fstdistfunc_;
-  size_t data_size_;
-  size_t dim_;
+  DISTFUNC<dist_t, data_t> fstdistfunc_; // 这里定义了距离函数
+  size_t data_size_; // 数据的size, 一个vector的大小
+  size_t dim_; // 数据的维度
 
 public:
+
+  // 这里是模板构造函数, 计算data_size_, dim, 以及距离度量函数
   EuclideanSpace(size_t dim) : data_size_(dim * sizeof(data_t)), dim_(dim) {
     if (dim % 128 == 0)
       fstdistfunc_ = L2Sqr<dist_t, data_t, 128, scalefactor>;
@@ -272,6 +281,7 @@ public:
   ~EuclideanSpace() {}
 };
 
+// 这里相当于模板的specification, 具体说明对应类型的实例化方式
 template <>
 EuclideanSpace<float, float>::EuclideanSpace(size_t dim)
     : data_size_(dim * sizeof(float)), dim_(dim) {

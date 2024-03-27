@@ -89,7 +89,7 @@ public:
     size_data_per_element_ =
         size_links_level0_ + data_size_ + sizeof(labeltype); // 0层每个点的所需空间
     offsetData_ = size_links_level0_;
-    label_offset_ = size_links_level0_ + data_size_;
+    label_offset_ = size_links_level0_ + data_size_; //! 内存构成 [link_neighbor linklist_size real_data label]
     offsetLevel0_ = 0;
 
     data_level0_memory_ =
@@ -164,7 +164,7 @@ public:
   size_t offsetData_, offsetLevel0_;
 
   char *data_level0_memory_;
-  char **linkLists_;
+  char **linkLists_; // 所以这里就是每个节点的邻接表
   std::vector<int> element_levels_;
 
   size_t data_size_;
@@ -174,8 +174,8 @@ public:
   size_t label_offset_;
   DISTFUNC<dist_t, data_t> fstdistfunc_;
   size_t dist_func_param_;
-  std::unordered_map<labeltype, tableint> label_lookup_;
 
+  std::unordered_map<labeltype, tableint> label_lookup_; // label -> table的映射
   std::default_random_engine level_generator_;
   std::default_random_engine update_probability_generator_;
 
@@ -198,13 +198,13 @@ public:
     return (labeltype *)(data_level0_memory_ +
                          internal_id * size_data_per_element_ + label_offset_);
   }
-
+  // 获取id对应的vector
   inline data_t *getDataByInternalId(tableint internal_id) const {
     return reinterpret_cast<data_t *>(data_level0_memory_ +
                                       internal_id * size_data_per_element_ +
                                       offsetData_);
   }
-
+  // 这里就是论文中最经典的方式获取随机的level
   int getRandomLevel(double reverse_size) {
     std::uniform_real_distribution<double> distribution(0.0, 1.0);
     double r = -log(distribution(level_generator_)) * reverse_size;
@@ -237,60 +237,61 @@ public:
     dist_t lowerBound;
     if (!isMarkedDeleted(ep_id)) {
       dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id),
-                                 dist_func_param_);
-      top_candidates.emplace(dist, ep_id);
-      lowerBound = dist;
-      candidateSet.emplace(-dist, ep_id);
+                                 dist_func_param_); // 计算当前点和入口点ep_id的距离
+      top_candidates.emplace(dist, ep_id); // 压入队列中
+      lowerBound = dist; // 当前点就是lower bound
+      candidateSet.emplace(-dist, ep_id); // 这里对应的candidate set
     } else {
       lowerBound = std::numeric_limits<dist_t>::max();
       candidateSet.emplace(-lowerBound, ep_id);
     }
-    visited_array[ep_id] = visited_array_tag;
+    visited_array[ep_id] = visited_array_tag; // 记录当前节点已经被访问过
 
-    while (!candidateSet.empty()) {
-      std::pair<dist_t, tableint> curr_el_pair = candidateSet.top();
+    while (!candidateSet.empty()) { // 对candidate进行扩展
+      std::pair<dist_t, tableint> curr_el_pair = candidateSet.top(); // 获取当前最小的距离
       if ((-curr_el_pair.first) > lowerBound &&
-          top_candidates.size() == ef_construction_) {
+          top_candidates.size() == ef_construction_) { // 如果这个最小的距离还不及已有的, 那么就直接跳出
         break;
       }
-      candidateSet.pop();
+      candidateSet.pop(); // 弹出当前元素
 
-      tableint curNodeNum = curr_el_pair.second;
+      tableint curNodeNum = curr_el_pair.second; // 获取当前待扩展节点的id
 
-      std::unique_lock<std::mutex> lock(link_list_locks_[curNodeNum]);
+      std::unique_lock<std::mutex> lock(link_list_locks_[curNodeNum]); // 锁住这个节点, 因为要进行访问
 
       int *data; // = (int *)(linkList0_ + curNodeNum *
                  // size_links_per_element0_);
-      if (layer == 0) {
-        data = (int *)get_linklist0(curNodeNum);
+                 // data中保存的是layer层对应的元素的neighbor
+      if (layer == 0) { // 基于层数选择对应的函数
+        data = (int *)get_linklist0(curNodeNum); // 如果是0层
       } else {
-        data = (int *)get_linklist(curNodeNum, layer);
+        data = (int *)get_linklist(curNodeNum, layer); // 如果是其他层
         //                    data = (int *) (linkLists_[curNodeNum] + (layer -
         //                    1) * size_links_per_element_);
       }
-      size_t size = getListCount((linklistsizeint *)data);
-      tableint *datal = (tableint *)(data + 1);
+      size_t size = getListCount((linklistsizeint *)data); // 获取neighbor的数目
+      tableint *datal = (tableint *)(data + 1); // 这里相当于到neighbor
 
-      for (size_t j = 0; j < size; j++) {
-        tableint candidate_id = *(datal + j);
+      for (size_t j = 0; j < size; j++) { // 遍历该节点所有的邻居
+        tableint candidate_id = *(datal + j); // 获取第j个邻居
         //                    if (candidate_id == 0) continue;
-        if (visited_array[candidate_id] == visited_array_tag)
+        if (visited_array[candidate_id] == visited_array_tag) // 如果该节点已经被访问过
           continue;
-        visited_array[candidate_id] = visited_array_tag;
-        data_t *currObj1 = getDataByInternalId(candidate_id);
+        visited_array[candidate_id] = visited_array_tag; // 设置该节点已经被访问
+        data_t *currObj1 = getDataByInternalId(candidate_id); // 获取该节点的real vector数据
 
-        dist_t dist1 = fstdistfunc_(data_point, currObj1, dist_func_param_);
-        if (top_candidates.size() < ef_construction_ || lowerBound > dist1) {
+        dist_t dist1 = fstdistfunc_(data_point, currObj1, dist_func_param_); // 计算距离
+        if (top_candidates.size() < ef_construction_ || lowerBound > dist1) { // 加入候选集的情况
           candidateSet.emplace(-dist1, candidate_id);
 
           if (!isMarkedDeleted(candidate_id))
-            top_candidates.emplace(dist1, candidate_id);
+            top_candidates.emplace(dist1, candidate_id); // 加入到结果集
 
-          if (top_candidates.size() > ef_construction_)
+          if (top_candidates.size() > ef_construction_) // 如果超出范围就pop
             top_candidates.pop();
 
           if (!top_candidates.empty())
-            lowerBound = top_candidates.top().first;
+            lowerBound = top_candidates.top().first; // 更新lower bound
         }
       }
     }
@@ -399,38 +400,38 @@ public:
                           std::vector<std::pair<dist_t, tableint>>,
                           CompareByFirst> &top_candidates,
       const size_t M) {
-    if (top_candidates.size() < M) {
+    if (top_candidates.size() < M) { // 不需要剪裁的情况
       return;
     }
 
     std::priority_queue<std::pair<dist_t, tableint>> queue_closest;
-    std::vector<std::pair<dist_t, tableint>> return_list;
+    std::vector<std::pair<dist_t, tableint>> return_list; // 返回的结果集
     while (top_candidates.size() > 0) {
       queue_closest.emplace(-top_candidates.top().first,
-                            top_candidates.top().second);
+                            top_candidates.top().second); // 将结果压入到queue中
       top_candidates.pop();
     }
 
     while (queue_closest.size()) {
-      if (return_list.size() >= M)
+      if (return_list.size() >= M) // 直到return_list大于M
         break;
-      std::pair<dist_t, tableint> curent_pair = queue_closest.top();
+      std::pair<dist_t, tableint> curent_pair = queue_closest.top(); // 选取最近的pair
       dist_t dist_to_query = -curent_pair.first;
       queue_closest.pop();
       bool good = true;
 
-      for (std::pair<dist_t, tableint> second_pair : return_list) {
+      for (std::pair<dist_t, tableint> second_pair : return_list) { // 这里相当于进行比较剪裁了
         dist_t curdist = fstdistfunc_(getDataByInternalId(second_pair.second),
                                       getDataByInternalId(curent_pair.second),
-                                      dist_func_param_);
+                                      dist_func_param_); // 计算second_pair和current_pair的距离
         ;
-        if (curdist < dist_to_query) {
+        if (curdist < dist_to_query) { // 这里就是HNSW的剪裁策略, 如果存在局部稠密现象
           good = false;
           break;
         }
       }
       if (good) {
-        return_list.push_back(curent_pair);
+        return_list.push_back(curent_pair); // 如果结果好就压入到return_list
       }
     }
 
@@ -462,15 +463,15 @@ public:
     return level == 0 ? get_linklist0(internal_id)
                       : get_linklist(internal_id, level);
   };
-
+  // 这里应该就是对新的元素进行相互的连接
   tableint mutuallyConnectNewElement(
       const data_t *data_point, tableint cur_c,
       std::priority_queue<std::pair<dist_t, tableint>,
                           std::vector<std::pair<dist_t, tableint>>,
                           CompareByFirst> &top_candidates,
       int level, bool isUpdate) {
-    size_t Mcurmax = level ? maxM_ : maxM0_;
-    getNeighborsByHeuristic2(top_candidates, M_);
+    size_t Mcurmax = level ? maxM_ : maxM0_; // 需要连接的节点数目
+    getNeighborsByHeuristic2(top_candidates, M_); // 这里相当于采用启发式剪裁邻居节点
     if (top_candidates.size() > M_)
       throw std::runtime_error(
           "Should be not be more than M_ candidates returned by the heuristic");
@@ -1276,16 +1277,16 @@ public:
     memcpy(result.data(), ll, size * sizeof(tableint));
     return result;
   };
-  // 这里就是添加每一个点
+  // 这里就是添加每一个点, data_point是点的vector, label是当前点的id,
   tableint addPoint(const data_t *data_point, labeltype label, int level) {
-    std::shared_lock<std::shared_mutex> lock(resizeLock);
+    std::shared_lock<std::shared_mutex> lock(resizeLock); // 创建即加锁
     tableint cur_c = 0;
     {
       // Checking if the element with the same label already exists
       // if so, updating it *instead* of creating a new element.
-      std::unique_lock<std::mutex> templock_curr(cur_element_count_guard_);
-      auto search = label_lookup_.find(label);
-      if (search != label_lookup_.end()) {
+      std::unique_lock<std::mutex> templock_curr(cur_element_count_guard_); // 这里因为要修改cur_element, 所以就锁起来
+      auto search = label_lookup_.find(label); // 这里相当于查看是否当前label已经存在
+      if (search != label_lookup_.end()) { //TODO 这里相当与如果节点已经存在
         tableint existingInternalId = search->second;
         templock_curr.unlock();
 
@@ -1300,7 +1301,7 @@ public:
         return existingInternalId;
       }
 
-      if (cur_element_count >= max_elements_) {
+      if (cur_element_count >= max_elements_) { // 如果当前的节点数目已经大于最大元素数目
         throw IndexFullError(
             "Cannot insert elements; this index already contains " +
             std::to_string(cur_element_count) +
@@ -1310,23 +1311,23 @@ public:
             "index.");
       };
 
-      cur_c = cur_element_count;
+      cur_c = cur_element_count; // cur_c赋值为当前最大元素数目
       cur_element_count++;
-      label_lookup_[label] = cur_c;
+      label_lookup_[label] = cur_c; // 将label和cur_c进行映射
     }
 
     // Take update lock to prevent race conditions on an element with
-    // insertion/update at the same time.
+    // insertion/update at the same time. 对link_list进行加锁, 准备更新, 这里相当于采用Hash方式的桶锁
     std::unique_lock<std::mutex> lock_el_update(
         link_list_update_locks_[(cur_c & (max_update_element_locks - 1))]);
     std::unique_lock<std::mutex> lock_el(link_list_locks_[cur_c]);
-    int curlevel = getRandomLevel(mult_);
+    int curlevel = getRandomLevel(mult_); // 获取一个随机的层
     if (level > 0)
       curlevel = level;
 
-    element_levels_[cur_c] = curlevel;
+    element_levels_[cur_c] = curlevel; // 记录当前元素的level
 
-    std::unique_lock<std::mutex> templock(global);
+    std::unique_lock<std::mutex> templock(global); // 这里获取了全局锁, 这里关乎到对max_level的操作
     int maxlevelcopy = maxlevel_;
     if (curlevel <= maxlevelcopy)
       templock.unlock();
@@ -1334,23 +1335,23 @@ public:
     tableint enterpoint_copy = enterpoint_node_;
 
     memset(data_level0_memory_ + cur_c * size_data_per_element_ + offsetLevel0_,
-           0, size_data_per_element_);
+           0, size_data_per_element_); // 对这块内存进行初始化
 
     // Initialisation of the data and label
-    memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));
-    memcpy(getDataByInternalId(cur_c), data_point, data_size_);
+    memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype)); // 这里相当于是获取label所在的内存并copy
+    memcpy(getDataByInternalId(cur_c), data_point, data_size_); // 这里是获取到了数据的内存并copy
 
-    if (curlevel) {
+    if (curlevel) { //TODO 如果cur_level > 0, 存在大于0的层的情况
       linkLists_[cur_c] =
-          (char *)malloc(size_links_per_element_ * curlevel + 1);
+          (char *)malloc(size_links_per_element_ * curlevel + 1); //! 这里就相当于为邻接表分配内存, 基于层数进行分配, 但是这里单独的一个字节什么含义呢
       if (linkLists_[cur_c] == nullptr)
         throw std::runtime_error(
             "Not enough memory: addPoint failed to allocate linklist");
-      memset(linkLists_[cur_c], 0, size_links_per_element_ * curlevel + 1);
+      memset(linkLists_[cur_c], 0, size_links_per_element_ * curlevel + 1); // 元素初始化
     }
 
-    if ((signed)currObj != -1) {
-
+    if ((signed)currObj != -1) { //TODO 已经存在入口点的情况
+      // 这里是当前层小于最大层
       if (curlevel < maxlevelcopy) {
 
         dist_t curdist = fstdistfunc_(data_point, getDataByInternalId(currObj),
@@ -1382,7 +1383,7 @@ public:
         }
       }
 
-      bool epDeleted = isMarkedDeleted(enterpoint_copy);
+      bool epDeleted = isMarkedDeleted(enterpoint_copy); //TODO 查看该节点是否已经删除
       for (int level = std::min(curlevel, maxlevelcopy); level >= 0; level--) {
         if (level > maxlevelcopy || level < 0) // possible?
           throw std::runtime_error("Level error");
@@ -1390,7 +1391,7 @@ public:
         std::priority_queue<std::pair<dist_t, tableint>,
                             std::vector<std::pair<dist_t, tableint>>,
                             CompareByFirst>
-            top_candidates = searchBaseLayer(currObj, data_point, level);
+            top_candidates = searchBaseLayer(currObj, data_point, level); // 搜索该层的结果集
         if (epDeleted) {
           top_candidates.emplace(
               fstdistfunc_(data_point, getDataByInternalId(enterpoint_copy),
@@ -1404,12 +1405,12 @@ public:
       }
 
     } else {
-      // Do nothing for the first element
+      // Do nothing for the first element, 这里就相当于是第一个元素, 啥也不干, 赋值entry和maxlevel
       enterpoint_node_ = 0;
       maxlevel_ = curlevel;
     }
 
-    // Releasing lock for the maximum level
+    // Releasing lock for the maximum level, 如果当前的level最大, 重新赋值level和entry
     if (curlevel > maxlevelcopy) {
       enterpoint_node_ = cur_c;
       maxlevel_ = curlevel;

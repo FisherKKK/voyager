@@ -71,7 +71,7 @@ public:
       pool.push_front(new VisitedList(numelements));
   }
 
-  VisitedList *getFreeVisitedList() {
+  VisitedList *getFreeVisitedList() { // 这里相当于获取一个free的visited list, 逻辑就是如果有返回一个, 没有就new一个出来
     VisitedList *rez;
     {
       std::unique_lock<std::mutex> lock(poolguard);

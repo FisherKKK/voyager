@@ -136,7 +136,7 @@ public:
   size_t max_elements_; // 最大元素数目
   size_t cur_element_count; // 当前元素数目
   size_t size_data_per_element_;  // 每一个向量的大小
-  size_t size_links_per_element_; // 每一个向量的link大小
+  size_t size_links_per_element_; // 每一个向量的link大小 [neighbor_size(uint) n1 n2 (1 byte)]
   size_t num_deleted_; // 删除的点的数目
 
   size_t M_; // 每个点的边数
@@ -434,7 +434,7 @@ public:
         return_list.push_back(curent_pair); // 如果结果好就压入到return_list
       }
     }
-
+    // 这里相当于保存了最终剪裁后的结果
     for (std::pair<dist_t, tableint> curent_pair : return_list) {
       top_candidates.emplace(-curent_pair.first, curent_pair.second);
     }
@@ -478,15 +478,15 @@ public:
 
     std::vector<tableint> selectedNeighbors;
     selectedNeighbors.reserve(M_);
-    while (top_candidates.size() > 0) {
+    while (top_candidates.size() > 0) { // 这里相当于把剪裁后的结果加入到selectNeighbors中
       selectedNeighbors.push_back(top_candidates.top().second);
       top_candidates.pop();
     }
-
+    // 最近邻的点就是back, 作为下一层的入口点
     tableint next_closest_entry_point = selectedNeighbors.back();
 
     {
-      linklistsizeint *ll_cur;
+      linklistsizeint *ll_cur; // 获取该层的邻居数组
       if (level == 0)
         ll_cur = get_linklist0(cur_c);
       else
@@ -496,20 +496,20 @@ public:
         throw std::runtime_error(
             "The newly inserted element should have blank link list");
       }
-      setListCount(ll_cur, selectedNeighbors.size());
+      setListCount(ll_cur, selectedNeighbors.size()); // 设置neighbor的数目
       tableint *data = (tableint *)(ll_cur + 1);
-      for (size_t idx = 0; idx < selectedNeighbors.size(); idx++) {
+      for (size_t idx = 0; idx < selectedNeighbors.size(); idx++) { // 对neighbor进行遍历
         if (data[idx] && !isUpdate)
           throw std::runtime_error("Possible memory corruption");
         if (level > element_levels_[selectedNeighbors[idx]])
           throw std::runtime_error(
               "Trying to make a link on a non-existent level");
 
-        data[idx] = selectedNeighbors[idx];
+        data[idx] = selectedNeighbors[idx]; // 设置邻居
       }
     }
 
-    for (size_t idx = 0; idx < selectedNeighbors.size(); idx++) {
+    for (size_t idx = 0; idx < selectedNeighbors.size(); idx++) { // 这里应该是连反向边
 
       std::unique_lock<std::mutex> lock(
           link_list_locks_[selectedNeighbors[idx]]);
@@ -530,7 +530,7 @@ public:
         throw std::runtime_error(
             "Trying to make a link on a non-existent level");
 
-      tableint *data = (tableint *)(ll_other + 1);
+      tableint *data = (tableint *)(ll_other + 1); // 获取neighbor
 
       bool is_cur_c_present = false;
       if (isUpdate) {
@@ -546,11 +546,11 @@ public:
       // `selectedNeighbors[idx]` then no need to modify any connections or run
       // the heuristics.
       if (!is_cur_c_present) {
-        if (sz_link_list_other < Mcurmax) {
-          data[sz_link_list_other] = cur_c;
+        if (sz_link_list_other < Mcurmax) { // 当前的边数没有满
+          data[sz_link_list_other] = cur_c; // 直接添加即可
           setListCount(ll_other, sz_link_list_other + 1);
         } else {
-          // finding the "weakest" element to replace it with the new one
+          // finding the "weakest" element to replace it with the new one, 这里相当于邻居数目已经满了, 需要剪裁
           dist_t d_max = fstdistfunc_(
               getDataByInternalId(cur_c),
               getDataByInternalId(selectedNeighbors[idx]), dist_func_param_);
@@ -569,11 +569,11 @@ public:
                 data[j]);
           }
 
-          getNeighborsByHeuristic2(candidates, Mcurmax);
+          getNeighborsByHeuristic2(candidates, Mcurmax); // 这里又是一个启发式剪裁
 
           int indx = 0;
           while (candidates.size() > 0) {
-            data[indx] = candidates.top().second;
+            data[indx] = candidates.top().second; // 重新设置邻居
             candidates.pop();
             indx++;
           }
@@ -1091,7 +1091,7 @@ public:
   unsigned short int getListCount(linklistsizeint *ptr) const {
     return *((unsigned short int *)ptr);
   }
-
+  // 设置当前List的neighbor数目
   void setListCount(linklistsizeint *ptr, unsigned short int size) const {
     *((unsigned short int *)(ptr)) = *((unsigned short int *)&size);
   }
@@ -1341,7 +1341,7 @@ public:
     memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype)); // 这里相当于是获取label所在的内存并copy
     memcpy(getDataByInternalId(cur_c), data_point, data_size_); // 这里是获取到了数据的内存并copy
 
-    if (curlevel) { //TODO 如果cur_level > 0, 存在大于0的层的情况
+    if (curlevel) {
       linkLists_[cur_c] =
           (char *)malloc(size_links_per_element_ * curlevel + 1); //! 这里就相当于为邻接表分配内存, 基于层数进行分配, 但是这里单独的一个字节什么含义呢
       if (linkLists_[cur_c] == nullptr)
@@ -1350,30 +1350,30 @@ public:
       memset(linkLists_[cur_c], 0, size_links_per_element_ * curlevel + 1); // 元素初始化
     }
 
-    if ((signed)currObj != -1) { //TODO 已经存在入口点的情况
+    if ((signed)currObj != -1) {
       // 这里是当前层小于最大层
-      if (curlevel < maxlevelcopy) {
+      if (curlevel < maxlevelcopy) { // 这里的思路是先从上层搜最近邻, 最后在下层进行连边操作
 
         dist_t curdist = fstdistfunc_(data_point, getDataByInternalId(currObj),
                                       dist_func_param_);
         for (int level = maxlevelcopy; level > curlevel; level--) {
-
+          // 这里的搜索应该就是假定是一个单调递减网络, 直接使用一个节点搜索, 没有采用candidate集的方式
           bool changed = true;
           while (changed) {
             changed = false;
             unsigned int *data;
             std::unique_lock<std::mutex> lock(link_list_locks_[currObj]);
-            data = get_linklist(currObj, level);
-            int size = getListCount(data);
+            data = get_linklist(currObj, level); // 获取当前节点
+            int size = getListCount(data); // 获取这个neighbor的size
 
             tableint *datal = (tableint *)(data + 1);
-            for (int i = 0; i < size; i++) {
+            for (int i = 0; i < size; i++) { // 遍历当前节点的所有邻居, 进行扩展搜索
               tableint cand = datal[i];
               if (cand < 0 || cand > max_elements_)
                 throw std::runtime_error("cand error");
               dist_t d = fstdistfunc_(data_point, getDataByInternalId(cand),
-                                      dist_func_param_);
-              if (d < curdist) {
+                                      dist_func_param_); // 计算距离
+              if (d < curdist) { // 如果小于当前的最小距离
                 curdist = d;
                 currObj = cand;
                 changed = true;
@@ -1382,7 +1382,7 @@ public:
           }
         }
       }
-
+      // 这里就相当于进入到该节点所属层及其一下的层, currObj是该层及以下的入口点
       bool epDeleted = isMarkedDeleted(enterpoint_copy); //TODO 查看该节点是否已经删除
       for (int level = std::min(curlevel, maxlevelcopy); level >= 0; level--) {
         if (level > maxlevelcopy || level < 0) // possible?
@@ -1401,7 +1401,7 @@ public:
             top_candidates.pop();
         }
         currObj = mutuallyConnectNewElement(data_point, cur_c, top_candidates,
-                                            level, false);
+                                            level, false); // 进行双向连边, 更新入口点
       }
 
     } else {
